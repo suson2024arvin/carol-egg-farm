@@ -89,6 +89,20 @@ export default function Home() {
       return;
     }
 
+    // ✅ Validate sensors
+    for (let i = 0; i < sensors.length; i++) {
+      const s = sensors[i];
+
+      if (
+        s.ammonia === "" ||
+        s.temperature === "" ||
+        s.humidity === ""
+      ) {
+        alert(`Please complete all fields for Sensor ${i + 1}`);
+        return;
+      }
+    }
+
     setHistory((prev) => ({
       ...prev,
       [date]: { eggData, sensors }
