@@ -83,13 +83,27 @@ export default function Home() {
     localStorage.setItem("eggHistory", JSON.stringify(history));
   }, [history]);
 
+  useEffect(() => {
+    if (!date) return;
+    const entry = history[date];
+    if (entry) {
+      setEggData(entry.eggData.map(set => [...set]));
+      setSensors(entry.sensors.map(s => ({ ...s })));
+    } else {
+      setEggData(emptyData());
+      setSensors(emptySensors());
+    }
+    // ✅ ALWAYS RESET TO SET 1
+    setCurrentSet(0);
+  }, [date]);  
+
   const handleSave = () => {
     if (!date) {
       alert("Please select a date");
       return;
     }
-
-    // ✅ Validate sensors
+    
+    // Validate sensors
     for (let i = 0; i < sensors.length; i++) {
       const s = sensors[i];
 
@@ -103,9 +117,16 @@ export default function Home() {
       }
     }
 
+    // ✅ DEEP COPY (FIX)
+    const eggDataCopy = eggData.map(set => [...set]);
+    const sensorsCopy = sensors.map(s => ({ ...s }));
+
     setHistory((prev) => ({
       ...prev,
-      [date]: { eggData, sensors }
+      [date]: {
+        eggData: eggDataCopy,
+        sensors: sensorsCopy
+      }
     }));
 
     alert("Saved locally ✔");
@@ -114,12 +135,65 @@ export default function Home() {
   const loadEntry = (selectedDate) => {
     const entry = history[selectedDate];
     if (entry) {
-      setEggData(entry.eggData);
-      setSensors(entry.sensors || emptySensors());
+      // ✅ DEEP COPY (SAFE LOAD)
+      setEggData(entry.eggData.map(set => [...set]));
+      setSensors(entry.sensors.map(s => ({ ...s })));
       setDate(selectedDate);
       setActiveTab("entry");
+      setCurrentSet(0);
     }
   };
+
+  // =========================
+  // 🔥 ANALYSIS LOGIC (SAFE)
+  // =========================
+
+  const analysisData = Object.keys(history)
+    .sort()
+    .map((date) => {
+      const total = history[date].eggData
+        .flat()
+        .reduce((s, v) => s + (parseInt(v) || 0), 0);
+
+      const avgTemp =
+        history[date].sensors.reduce(
+          (sum, s) => sum + parseFloat(s.temperature || 0),
+          0
+        ) / history[date].sensors.length;
+
+      return { date, total, avgTemp };
+    });
+
+  const bestDay = analysisData.length
+    ? analysisData.reduce((a, b) => (b.total > a.total ? b : a))
+    : null;
+
+  const worstDay = analysisData.length
+    ? analysisData.reduce((a, b) => (b.total < a.total ? b : a))
+    : null;
+
+  const drops = [];
+  for (let i = 1; i < analysisData.length; i++) {
+    const prev = analysisData[i - 1];
+    const curr = analysisData[i];
+
+    if (curr.total < prev.total * 0.9) {
+      drops.push(`${curr.date} dropped vs ${prev.date}`);
+    }
+  }
+
+  const avg = (arr) =>
+    arr.length
+      ? Math.round(arr.reduce((s, d) => s + d.total, 0) / arr.length)
+      : 0;
+
+  const highTemp = analysisData.filter(d => d.avgTemp > 30);
+  const normalTemp = analysisData.filter(d => d.avgTemp <= 30);
+
+  const highTempAvg = avg(highTemp);
+  const normalTempAvg = avg(normalTemp);
+
+  // =========================
 
   if (!authorized) {
     return (
@@ -355,15 +429,47 @@ export default function Home() {
         )}
 
         {activeTab === "analysis" && (
-          <div style={{
-            border: "1px dashed #ccc",
-            padding: "20px",
-            borderRadius: "8px",
-            textAlign: "center"
-          }}>
-            📈 Analysis feature coming soon
+          <div
+            style={{
+              border: "1px dashed #ccc",
+              padding: "20px",
+              borderRadius: "8px"
+            }}
+          >
+            <h3>📊 Daily Totals</h3>
+            {analysisData.map(d => (
+              <div key={d.date}>
+                {d.date} — {d.total} eggs
+              </div>
+            ))}
+
+            <hr style={{ margin: "15px 0" }} />
+
+            <h3>🥇 Performance</h3>
+            {bestDay && (
+              <>
+                <div>Best Day: {bestDay.date} ({bestDay.total} eggs)</div>
+                <div>Worst Day: {worstDay.date} ({worstDay.total} eggs)</div>
+              </>
+            )}
+
+            <hr style={{ margin: "15px 0" }} />
+
+            <h3>⚠️ Alerts</h3>
+            {drops.length === 0 ? (
+              <div>No major drops detected</div>
+            ) : (
+              drops.map((d, i) => <div key={i}>⚠ {d}</div>)
+            )}
+
+            <hr style={{ margin: "15px 0" }} />
+
+            <h3>🌡 Temperature Insight</h3>
+            <div>High Temp Avg: {highTempAvg} eggs</div>
+            <div>Normal Temp Avg: {normalTempAvg} eggs</div>
           </div>
         )}
+
       </div>
     </main>
   );
