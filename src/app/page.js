@@ -1,6 +1,14 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer
+} from "recharts";
 
 export default function Home() {
   const TOTAL_SETS = 23;
@@ -30,6 +38,9 @@ export default function Home() {
 
   const [eggData, setEggData] = useState(emptyData());
   const [history, setHistory] = useState({});
+
+  const [analysisTab, setAnalysisTab] = useState("overview");
+  const [envTab, setEnvTab] = useState("overview");
 
   const accessKey = "MTIzNDU=";
 
@@ -192,6 +203,171 @@ export default function Home() {
 
   const highTempAvg = avg(highTemp);
   const normalTempAvg = avg(normalTemp);
+
+  // 7-day moving average
+  const movingAvg = analysisData.map((_, i, arr) => {
+    const slice = arr.slice(Math.max(0, i - 6), i + 1);
+    return {
+      date: arr[i].date,
+      avg: Math.round(
+        slice.reduce((s, d) => s + d.total, 0) / slice.length
+      )
+    };
+  });
+
+  // Consistency (standard deviation)
+  const totals = analysisData.map(d => d.total);
+  const mean = avg(analysisData);
+  const variance =
+    totals.length > 0
+      ? totals.reduce((s, t) => s + Math.pow(t - mean, 2), 0) / totals.length
+      : 0;
+
+  const stdDev = Math.round(Math.sqrt(variance));
+
+  // Ammonia impact
+  const ammoniaData = Object.keys(history).map(date => {
+    const entry = history[date];
+
+    const avgAmmonia =
+      entry.sensors.reduce(
+        (sum, s) => sum + parseFloat(s.ammonia || 0),
+        0
+      ) / entry.sensors.length;
+
+    const total = entry.eggData
+      .flat()
+      .reduce((s, v) => s + (parseInt(v) || 0), 0);
+
+    return { date, total, avgAmmonia };
+  });
+
+  const highAmmonia = ammoniaData.filter(d => d.avgAmmonia > 25);
+  const lowAmmonia = ammoniaData.filter(d => d.avgAmmonia <= 25);
+
+  const highAmmoniaAvg = avg(highAmmonia);
+  const lowAmmoniaAvg = avg(lowAmmonia);
+
+  // Humidity impact
+  const humidityData = Object.keys(history).map(date => {
+    const entry = history[date];
+
+    const avgHumidity =
+      entry.sensors.reduce(
+        (sum, s) => sum + parseFloat(s.humidity || 0),
+        0
+      ) / entry.sensors.length;
+
+    const total = entry.eggData
+      .flat()
+      .reduce((s, v) => s + (parseInt(v) || 0), 0);
+
+    return { date, total, avgHumidity };
+  });
+
+  // You can adjust threshold later (e.g., 60–70 ideal range)
+  const highHumidity = humidityData.filter(d => d.avgHumidity > 70);
+  const normalHumidity = humidityData.filter(d => d.avgHumidity <= 70);
+
+  const highHumidityAvg = avg(highHumidity);
+  const normalHumidityAvg = avg(normalHumidity);
+
+  // Combined environment dataset (for charts)
+  const envChartData = Object.keys(history)
+    .sort()
+    .map(date => {
+      const entry = history[date];
+
+      const total = entry.eggData
+        .flat()
+        .reduce((s, v) => s + (parseInt(v) || 0), 0);
+
+      const avgTemp =
+        entry.sensors.reduce((s, x) => s + parseFloat(x.temperature || 0), 0) /
+        entry.sensors.length;
+
+      const avgHumidity =
+        entry.sensors.reduce((s, x) => s + parseFloat(x.humidity || 0), 0) /
+        entry.sensors.length;
+
+      const avgAmmonia =
+        entry.sensors.reduce((s, x) => s + parseFloat(x.ammonia || 0), 0) /
+        entry.sensors.length;
+
+      return {
+        date,
+        eggs: total,
+        temp: Number(avgTemp.toFixed(2)),
+        humidity: Number(avgHumidity.toFixed(2)),
+        ammonia: Number(avgAmmonia.toFixed(2))
+      };
+    });
+
+  // Multi-day decline detection (strong alert)
+  const sustainedDrops = [];
+  for (let i = 2; i < analysisData.length; i++) {
+    if (
+      analysisData[i].total < analysisData[i - 1].total &&
+      analysisData[i - 1].total < analysisData[i - 2].total
+    ) {
+      sustainedDrops.push(analysisData[i].date);
+    }
+  }
+
+  // =========================
+  // 🔥 ADVANCED INSIGHTS
+  // =========================
+
+  // 🧠 Predict tomorrow (simple trend-based)
+  const prediction = (() => {
+    if (analysisData.length < 3) return null;
+
+    const last3 = analysisData.slice(-3);
+    const trend =
+      (last3[2].total - last3[0].total) / 2;
+
+    const predicted =
+      Math.round(last3[2].total + trend);
+
+    return Math.max(predicted, 0);
+  })();
+
+  // 🐔 Per-set performance (identify weak sets)
+  const setPerformance = Array.from({ length: TOTAL_SETS }, (_, setIndex) => {
+    let total = 0;
+    let days = 0;
+
+    Object.values(history).forEach(entry => {
+      if (entry.eggData[setIndex]) {
+        total += entry.eggData[setIndex].reduce(
+          (s, v) => s + (parseInt(v) || 0),
+          0
+        );
+        days++;
+      }
+    });
+
+    return {
+      set: setIndex + 1,
+      avg: days ? Math.round(total / days) : 0
+    };
+  }).sort((a, b) => b.avg - a.avg);
+
+  const weakestSets = setPerformance.slice(-3);
+
+  // 🔥 Feed efficiency placeholder (ready for future)
+  const feedEfficiency = (() => {
+    // future: eggs / feed input
+    // for now use total eggs as baseline
+    if (!analysisData.length) return null;
+
+    const avgEggs = avg(analysisData);
+
+    return {
+      efficiency: avgEggs,
+      note: "Feed tracking not added yet"
+    };
+  })();
 
   // =========================
 
@@ -428,45 +604,282 @@ export default function Home() {
           </div>
         )}
 
+
+
+
         {activeTab === "analysis" && (
-          <div
-            style={{
-              border: "1px dashed #ccc",
-              padding: "20px",
-              borderRadius: "8px"
-            }}
-          >
-            <h3>📊 Daily Totals</h3>
-            {analysisData.map(d => (
-              <div key={d.date}>
-                {d.date} — {d.total} eggs
-              </div>
-            ))}
+          <div style={{ border: "1px dashed #ccc", padding: "20px", borderRadius: "8px" }}>
 
-            <hr style={{ margin: "15px 0" }} />
+            {/* 🔥 ANALYSIS TABS */}
+            <div style={{ display: "flex", marginBottom: "15px" }}>
+              {[
+                { key: "overview", label: "Overview" },
+                { key: "trends", label: "Trends" },
+                { key: "alerts", label: "Alerts" },
+                { key: "environment", label: "Environment" },
+                { key: "performance", label: "Performance" }
+              ].map(tab => (
+                <button
+                  key={tab.key}
+                  onClick={() => setAnalysisTab(tab.key)}
+                  style={{
+                    flex: 1,
+                    padding: "8px",
+                    border: "none",
+                    cursor: "pointer",
+                    background: analysisTab === tab.key ? "#2563eb" : "#e5e7eb",
+                    color: analysisTab === tab.key ? "white" : "black"
+                  }}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
 
-            <h3>🥇 Performance</h3>
-            {bestDay && (
+            {/* OVERVIEW */}
+            {analysisTab === "overview" && (
               <>
-                <div>Best Day: {bestDay.date} ({bestDay.total} eggs)</div>
-                <div>Worst Day: {worstDay.date} ({worstDay.total} eggs)</div>
+                <h3>📊 Production Trend</h3>
+                <div style={{ width: "100%", height: "250px", minHeight: "250px" }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={analysisData}>
+                      <XAxis dataKey="date" hide />
+                      <YAxis />
+                      <Tooltip />
+                      <Line type="monotone" dataKey="total" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <hr style={{ margin: "15px 0" }} />
+
+                <h3>📊 Daily Totals</h3>
+                {analysisData.map(d => (
+                  <div key={d.date}>
+                    {d.date} — {d.total} eggs
+                  </div>
+                ))}
+
+                <hr style={{ margin: "15px 0" }} />
+
+                <h3>🥇 Performance</h3>
+                {bestDay && (
+                  <>
+                    <div>Best Day: {bestDay.date} ({bestDay.total} eggs)</div>
+                    <div>Worst Day: {worstDay.date} ({worstDay.total} eggs)</div>
+                  </>
+                )}
               </>
             )}
 
-            <hr style={{ margin: "15px 0" }} />
+            {/* TRENDS */}
+            {analysisTab === "trends" && (
+              <>
+                <h3>📈 Trend (7-Day Avg)</h3>
+                {movingAvg.map(d => (
+                  <div key={d.date}>
+                    {d.date} — {d.avg} avg eggs
+                  </div>
+                ))}
 
-            <h3>⚠️ Alerts</h3>
-            {drops.length === 0 ? (
-              <div>No major drops detected</div>
-            ) : (
-              drops.map((d, i) => <div key={i}>⚠ {d}</div>)
+                <hr style={{ margin: "15px 0" }} />
+
+                <h3>📊 Consistency</h3>
+                <div>Std Dev: {stdDev}</div>
+                <div>
+                  {stdDev < 10
+                    ? "Very stable production ✅"
+                    : stdDev < 25
+                    ? "Moderate fluctuation ⚠"
+                    : "Unstable production 🚨"}
+                </div>
+              </>
             )}
 
-            <hr style={{ margin: "15px 0" }} />
+            {/* ALERTS */}
+            {analysisTab === "alerts" && (
+              <>
+                <h3>⚠️ Alerts</h3>
+                {drops.length === 0 ? (
+                  <div>No major drops detected</div>
+                ) : (
+                  drops.map((d, i) => <div key={i}>⚠ {d}</div>)
+                )}
 
-            <h3>🌡 Temperature Insight</h3>
-            <div>High Temp Avg: {highTempAvg} eggs</div>
-            <div>Normal Temp Avg: {normalTempAvg} eggs</div>
+                <hr style={{ margin: "15px 0" }} />
+
+                <h3>🚨 Strong Alerts</h3>
+                {sustainedDrops.length === 0 ? (
+                  <div>No sustained decline</div>
+                ) : (
+                  sustainedDrops.map((d, i) => (
+                    <div key={i}>🚨 3-day decline detected ending {d}</div>
+                  ))
+                )}
+              </>
+            )}
+
+            {/* ENVIRONMENT */}
+            {analysisTab === "environment" && (
+              <>
+                {/* 🔥 ENV SUB-TABS */}
+                <div style={{ display: "flex", marginBottom: "15px" }}>
+                  {[
+                    { key: "overview", label: "Overview" },
+                    { key: "temp", label: "Temp Chart" },
+                    { key: "humidity", label: "Humidity Chart" },
+                    { key: "ammonia", label: "Ammonia Chart" }
+                  ].map(tab => (
+                    <button
+                      key={tab.key}
+                      onClick={() => setEnvTab(tab.key)}
+                      style={{
+                        flex: 1,
+                        padding: "8px",
+                        border: "none",
+                        cursor: "pointer",
+                        background: envTab === tab.key ? "#2563eb" : "#e5e7eb",
+                        color: envTab === tab.key ? "white" : "black"
+                      }}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* ========================= */}
+                {/* OVERVIEW (INSIGHTS) */}
+                {/* ========================= */}
+                {envTab === "overview" && (
+                  <>
+                    <h3>🌡 Temperature Insight</h3>
+                    <div>High Temp Avg: {highTempAvg} eggs</div>
+                    <div>Normal Temp Avg: {normalTempAvg} eggs</div>
+
+                    <hr style={{ margin: "15px 0" }} />
+
+                    <h3>💧 Humidity Impact</h3>
+                    <div>High Humidity Avg: {highHumidityAvg} eggs</div>
+                    <div>Normal Humidity Avg: {normalHumidityAvg} eggs</div>
+
+                    <hr style={{ margin: "15px 0" }} />
+
+                    <h3>🧪 Ammonia Impact</h3>
+                    <div>High Ammonia Avg: {highAmmoniaAvg} eggs</div>
+                    <div>Low Ammonia Avg: {lowAmmoniaAvg} eggs</div>
+                  </>
+                )}
+
+                {/* ========================= */}
+                {/* TEMP CHART */}
+                {/* ========================= */}
+                {envTab === "temp" && (
+                  <>
+                    <h3>🌡 Temperature vs Eggs</h3>
+                    <div style={{ width: "100%", height: "250px", minHeight: "250px" }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={envChartData}>
+                          <XAxis dataKey="date" hide />
+                          <YAxis />
+                          <Tooltip />
+                          <Line type="monotone" dataKey="eggs" name="Eggs" />
+                          <Line type="monotone" dataKey="temp" name="Temp (°C)" />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </>
+                )}
+
+                {/* ========================= */}
+                {/* HUMIDITY CHART */}
+                {/* ========================= */}
+                {envTab === "humidity" && (
+                  <>
+                    <h3>💧 Humidity vs Eggs</h3>
+                    <div style={{ width: "100%", height: "250px", minHeight: "250px" }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={envChartData}>
+                          <XAxis dataKey="date" hide />
+                          <YAxis />
+                          <Tooltip />
+                          <Line type="monotone" dataKey="eggs" name="Eggs" />
+                          <Line type="monotone" dataKey="humidity" name="Humidity" />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </>
+                )}
+
+                {/* ========================= */}
+                {/* AMMONIA CHART */}
+                {/* ========================= */}
+                {envTab === "ammonia" && (
+                  <>
+                    <h3>🧪 Ammonia vs Eggs</h3>
+                    <div style={{ width: "100%", height: "250px", minHeight: "250px" }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={envChartData}>
+                          <XAxis dataKey="date" hide />
+                          <YAxis />
+                          <Tooltip />
+                          <Line type="monotone" dataKey="eggs" name="Eggs" />
+                          <Line type="monotone" dataKey="ammonia" name="Ammonia" />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+
+            {/* PERFORMANCE */}
+            {analysisTab === "performance" && (
+              <>
+                <h3>🐔 Set Performance</h3>
+
+                <div style={{ marginBottom: "10px" }}>
+                  <strong>Top 3 Sets</strong>
+                  {setPerformance.slice(0, 3).map(s => (
+                    <div key={s.set}>
+                      Set {s.set} — {s.avg} avg eggs
+                    </div>
+                  ))}
+                </div>
+
+                <div>
+                  <strong>Weakest Sets ⚠</strong>
+                  {weakestSets.map(s => (
+                    <div key={s.set}>
+                      Set {s.set} — {s.avg} avg eggs
+                    </div>
+                  ))}
+                </div>
+
+                <hr style={{ margin: "15px 0" }} />
+
+                <h3>🧠 Prediction</h3>
+                {prediction === null ? (
+                  <div>Not enough data</div>
+                ) : (
+                  <div>Tomorrow Estimate: {prediction} eggs</div>
+                )}
+
+                <hr style={{ margin: "15px 0" }} />
+
+                <h3>🔥 Feed Efficiency</h3>
+                {feedEfficiency ? (
+                  <>
+                    <div>Baseline: {feedEfficiency.efficiency} eggs/day</div>
+                    <div style={{ fontSize: "12px", color: "#666" }}>
+                      {feedEfficiency.note}
+                    </div>
+                  </>
+                ) : (
+                  <div>No data</div>
+                )}
+              </>
+            )}
+
           </div>
         )}
 
