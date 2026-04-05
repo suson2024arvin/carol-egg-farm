@@ -11,10 +11,19 @@ export default function Home() {
       Array(CAGES_PER_SET).fill("0")
     );
 
+  const emptySensors = () =>
+    Array.from({ length: 3 }, () => ({
+      ammonia: "",
+      temperature: "",
+      humidity: ""
+    }));
+
   const [authorized, setAuthorized] = useState(false);
   const [input, setInput] = useState("");
   const [error, setError] = useState("");
   const [date, setDate] = useState("");
+
+  const [sensors, setSensors] = useState(emptySensors());
 
   const [currentSet, setCurrentSet] = useState(0);
   const [activeTab, setActiveTab] = useState("entry");
@@ -47,8 +56,15 @@ export default function Home() {
     setEggData(updated);
   };
 
+  const handleSensorChange = (index, field, value) => {
+    const updated = [...sensors];
+    updated[index][field] = value;
+    setSensors(updated);
+  };
+
   const handleClear = () => {
     setEggData(emptyData());
+    setSensors(emptySensors());
   };
 
   const totalEggs = eggData.flat().reduce(
@@ -56,7 +72,7 @@ export default function Home() {
     0
   );
 
-  // ✅ LOAD HISTORY
+  // LOAD HISTORY
   useEffect(() => {
     const savedHistory = localStorage.getItem("eggHistory");
     if (savedHistory) {
@@ -64,12 +80,11 @@ export default function Home() {
     }
   }, []);
 
-  // ✅ SAVE HISTORY
+  // SAVE HISTORY
   useEffect(() => {
     localStorage.setItem("eggHistory", JSON.stringify(history));
   }, [history]);
 
-  // ✅ SAVE CURRENT ENTRY
   const handleSave = () => {
     if (!date) {
       alert("Please select a date");
@@ -78,33 +93,26 @@ export default function Home() {
 
     setHistory((prev) => ({
       ...prev,
-      [date]: { eggData }
+      [date]: { eggData, sensors }
     }));
 
     alert("Saved locally ✔");
   };
 
-  // ✅ LOAD FROM HISTORY
   const loadEntry = (selectedDate) => {
     const entry = history[selectedDate];
     if (entry) {
       setEggData(entry.eggData);
+      setSensors(entry.sensors || emptySensors());
       setDate(selectedDate);
       setActiveTab("entry");
     }
   };
 
-  // 🔒 LOGIN
   if (!authorized) {
     return (
       <main style={{ padding: "20px", maxWidth: "400px", margin: "auto" }}>
-        <div
-          style={{
-            border: "1px solid #ddd",
-            borderRadius: "12px",
-            padding: "20px"
-          }}
-        >
+        <div style={{ border: "1px solid #ddd", borderRadius: "12px", padding: "20px" }}>
           <h2 style={{ textAlign: "center" }}>🔒 Access</h2>
 
           <input
@@ -143,17 +151,10 @@ export default function Home() {
     );
   }
 
-  // 🐔 MAIN UI
   return (
     <main style={{ padding: "20px", maxWidth: "650px", margin: "auto" }}>
-      <div
-        style={{
-          border: "1px solid #ddd",
-          borderRadius: "12px",
-          padding: "20px"
-        }}
-      >
-        <h1 style={{ textAlign: "center" }}>🐔 Egg Farm</h1>
+      <div style={{ border: "1px solid #ddd", borderRadius: "12px", padding: "20px" }}>
+        <h1 style={{ textAlign: "center" }}>🐔 Carol's Fresh Farm Eggs</h1>
 
         {/* TABS */}
         <div style={{ display: "flex", marginBottom: "15px" }}>
@@ -181,7 +182,6 @@ export default function Home() {
           ))}
         </div>
 
-        {/* ENTRY TAB */}
         {activeTab === "entry" && (
           <>
             {/* DATE */}
@@ -201,20 +201,45 @@ export default function Home() {
               />
             </div>
 
+            {/* SENSOR INPUTS (GLOBAL) */}
+            <div style={{ marginBottom: "15px" }}>
+              {sensors.map((sensor, index) => (
+                <div key={index} style={{ marginBottom: "10px" }}>
+                  <strong>Sensor {index + 1}</strong>
+                  <div style={{ display: "flex", gap: "5px", marginTop: "5px" }}>
+                    <input type="number" step="0.01" inputMode="decimal"
+                      placeholder="Ammonia"
+                      value={sensor.ammonia}
+                      onChange={(e) =>
+                        handleSensorChange(index, "ammonia", e.target.value)
+                      }
+                    />
+                    <input type="number" step="0.01" inputMode="decimal"
+                      placeholder="Temp"
+                      value={sensor.temperature}
+                      onChange={(e) =>
+                        handleSensorChange(index, "temperature", e.target.value)
+                      }
+                    />
+                    <input type="number" step="0.01" inputMode="decimal"
+                      placeholder="Humidity"
+                      value={sensor.humidity}
+                      onChange={(e) =>
+                        handleSensorChange(index, "humidity", e.target.value)
+                      }
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+
             {/* GRID */}
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(4, 1fr)",
-                gap: "10px"
-              }}
-            >
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "10px" }}>
               {eggData[currentSet].map((value, cageIndex) => (
                 <div key={cageIndex}>
                   <label style={{ fontSize: "12px" }}>
                     Cage {cageIndex + 1}
                   </label>
-
                   <select
                     value={value}
                     onChange={(e) =>
@@ -237,135 +262,74 @@ export default function Home() {
               ))}
             </div>
 
-            {/* PAGINATION */}
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginTop: "20px"
-              }}
-            >
-              <button
-                disabled={currentSet === 0}
-                onClick={() => setCurrentSet(currentSet - 1)}
-                style={{
-                  padding: "10px 15px",
-                  borderRadius: "8px",
-                  border: "none",
-                  background: "#6b7280",
-                  color: "white",
-                  cursor: "pointer"
-                }}
-              >
+            {/* PAGINATION + BUTTONS unchanged */}
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: "15px" }}>
+              <button onClick={() => setCurrentSet(Math.max(0, currentSet - 1))}
+                style={{ padding: "10px 15px", borderRadius: "8px", border: "none", background: "#6b7280", color: "white", cursor: "pointer" }}>
                 ⬅ Prev
               </button>
 
-              <div style={{ fontWeight: "bold" }}>
-                Set {currentSet + 1} / {TOTAL_SETS}
-              </div>
+              <div>Set {currentSet + 1} / {TOTAL_SETS}</div>
 
-              <button
-                disabled={currentSet === TOTAL_SETS - 1}
-                onClick={() => setCurrentSet(currentSet + 1)}
-                style={{
-                  padding: "10px 15px",
-                  borderRadius: "8px",
-                  border: "none",
-                  background: "#2563eb",
-                  color: "white",
-                  cursor: "pointer"
-                }}
-              >
+              <button onClick={() => setCurrentSet(Math.min(TOTAL_SETS - 1, currentSet + 1))}
+                style={{ padding: "10px 15px", borderRadius: "8px", border: "none", background: "#2563eb", color: "white", cursor: "pointer" }}>
                 Next ➡
               </button>
             </div>
 
-            {/* ACTIONS */}
-            <div
-              style={{
-                display: "flex",
-                gap: "10px",
-                marginTop: "15px"
-              }}
-            >
-              <button
-                onClick={handleClear}
-                style={{
-                  flex: 1,
-                  padding: "10px",
-                  borderRadius: "8px",
-                  border: "none",
-                  background: "#ef4444",
-                  color: "white",
-                  fontWeight: "bold",
-                  cursor: "pointer"
-                }}
-              >
+            <div style={{ display: "flex", gap: "10px", marginTop: "15px" }}>
+              <button onClick={handleClear}
+                style={{ flex: 1, padding: "10px", borderRadius: "8px", border: "none", background: "#ef4444", color: "white", fontWeight: "bold", cursor: "pointer" }}>
                 Clear
               </button>
 
-              <button
-                onClick={handleSave}
-                style={{
-                  flex: 1,
-                  padding: "10px",
-                  borderRadius: "8px",
-                  border: "none",
-                  background: "#10b981",
-                  color: "white",
-                  fontWeight: "bold",
-                  cursor: "pointer"
-                }}
-              >
+              <button onClick={handleSave}
+                style={{ flex: 1, padding: "10px", borderRadius: "8px", border: "none", background: "#10b981", color: "white", fontWeight: "bold", cursor: "pointer" }}>
                 Save
               </button>
             </div>
 
-            {/* TOTAL */}
             <h3 style={{ textAlign: "center", marginTop: "15px" }}>
               Total Eggs: {totalEggs}
             </h3>
           </>
         )}
 
-        {/* HISTORY TAB */}
+        {/* HISTORY unchanged except total */}
         {activeTab === "history" && (
           <div>
-            {Object.keys(history).length === 0 && (
-              <p style={{ textAlign: "center" }}>No records yet</p>
-            )}
-
             {Object.keys(history)
               .sort((a, b) => b.localeCompare(a))
-              .map((d) => (
-                <div
-                  key={d}
-                  onClick={() => loadEntry(d)}
-                  style={{
-                    padding: "12px",
-                    border: "1px solid #ddd",
-                    borderRadius: "8px",
-                    marginBottom: "10px",
-                    cursor: "pointer"
-                  }}
-                >
-                  📅 {d}
-                </div>
-              ))}
+              .map((d) => {
+                const total = history[d].eggData.flat().reduce(
+                  (s, v) => s + (parseInt(v) || 0), 0
+                );
+
+                return (
+                  <div key={d}
+                    onClick={() => loadEntry(d)}
+                    style={{
+                      padding: "12px",
+                      border: "1px solid #ddd",
+                      borderRadius: "8px",
+                      marginBottom: "10px",
+                      cursor: "pointer"
+                    }}>
+                    📅 {d} — {total} eggs
+                  </div>
+                );
+              })}
           </div>
         )}
 
-        {/* ANALYSIS TAB */}
+        {/* ANALYSIS unchanged */}
         {activeTab === "analysis" && (
-          <div
-            style={{
-              border: "1px dashed #ccc",
-              padding: "20px",
-              borderRadius: "8px",
-              textAlign: "center"
-            }}
-          >
+          <div style={{
+            border: "1px dashed #ccc",
+            padding: "20px",
+            borderRadius: "8px",
+            textAlign: "center"
+          }}>
             📈 Analysis feature coming soon
           </div>
         )}
