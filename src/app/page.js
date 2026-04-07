@@ -19,12 +19,18 @@ export default function Home() {
       Array(CAGES_PER_SET).fill("0")
     );
 
-  const emptySensors = () =>
+  const createSensorSet = () =>
     Array.from({ length: 3 }, () => ({
       ammonia: "",
       temperature: "",
       humidity: ""
     }));
+
+  const emptySensors = () => ({
+    morning: createSensorSet(),
+    noon: createSensorSet(),
+    afternoon: createSensorSet()
+  });
 
   const [authorized, setAuthorized] = useState(false);
   const [input, setInput] = useState("");
@@ -41,8 +47,15 @@ export default function Home() {
 
   const [analysisTab, setAnalysisTab] = useState("overview");
   const [envTab, setEnvTab] = useState("overview");
+  const [entrySubTab, setEntrySubTab] = useState("eggs");
 
   const accessKey = "MTIzNDU=";
+
+  const SENSOR_TIMES = {
+    morning: 8,      // 8AM
+    noon: 12,        // 12PM
+    afternoon: 16    // 4PM
+  };
 
   const decode = (value) => {
     try {
@@ -50,6 +63,31 @@ export default function Home() {
     } catch {
       return "";
     }
+  };
+
+  const getCurrentHour = () => new Date().getHours();
+
+  const formatHour = (hour) => {
+    const suffix = hour >= 12 ? "PM" : "AM";
+    const formatted = hour % 12 === 0 ? 12 : hour % 12;
+    return `${formatted}${suffix}`;
+  };
+
+  const getSensorLabel = (timeKey) => {
+    return `${formatHour(SENSOR_TIMES[timeKey])} Sensor`;
+  };
+
+  const formatPHP = (value) => {
+    if (!value) return "";
+    return `₱${Number(value).toLocaleString("en-PH", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    })}`;
+  };
+
+  const parsePHP = (value) => {
+    if (!value) return "";
+    return value.replace(/[₱,\s]/g, "");
   };
 
   const handleLogin = () => {
@@ -67,11 +105,11 @@ export default function Home() {
     setEggData(updated);
   };
 
-  const handleSensorChange = (index, field, value) => {
-    const updated = [...sensors];
-    updated[index][field] = value;
+  const handleSensorChange = (time, index, field, value) => {
+    const updated = { ...sensors };
+    updated[time][index][field] = value;
     setSensors(updated);
-  };
+  };  
 
   const handleClear = () => {
     setEggData(emptyData());
@@ -83,11 +121,41 @@ export default function Home() {
     0
   );
 
+  const [oneTime, setOneTime] = useState({
+    batchStartDate: "",
+    initialAgeWeeks: "",
+    housingCost: "",
+    cageCost: "",
+    chickenCost: ""
+  });
+
+  const [ageWeeks, setAgeWeeks] = useState("");
+
   useEffect(() => {
     const savedHistory = localStorage.getItem("eggHistory");
     if (savedHistory) {
       setHistory(JSON.parse(savedHistory));
     }
+
+    const savedOneTime = localStorage.getItem("oneTimeData");
+    if (savedOneTime) {
+      const parsed = JSON.parse(savedOneTime);
+
+      const formatIfNeeded = (val) => {
+        if (!val) return "";
+        // already formatted
+        if (String(val).includes("₱")) return val;
+        return formatPHP(val);
+      };
+
+      setOneTime({
+        ...parsed,
+        housingCost: formatIfNeeded(parsed.housingCost),
+        cageCost: formatIfNeeded(parsed.cageCost),
+        chickenCost: formatIfNeeded(parsed.chickenCost)
+      });
+    }
+
   }, []);
 
   useEffect(() => {
@@ -95,15 +163,51 @@ export default function Home() {
   }, [history]);
 
   useEffect(() => {
+    localStorage.setItem("oneTimeData", JSON.stringify(oneTime));
+  }, [oneTime]);
+
+  useEffect(() => {
     if (!date) return;
     const entry = history[date];
     if (entry) {
       setEggData(entry.eggData.map(set => [...set]));
-      setSensors(entry.sensors.map(s => ({ ...s })));
+      if (Array.isArray(entry.sensors)) {
+        setSensors({
+          morning: entry.sensors.map(s => ({ ...s })),
+          noon: createSensorSet(),
+          afternoon: createSensorSet()
+        });
+      } else {
+        setSensors({
+          morning: entry.sensors.morning.map(s => ({ ...s })),
+          noon: entry.sensors.noon.map(s => ({ ...s })),
+          afternoon: entry.sensors.afternoon.map(s => ({ ...s }))
+        });
+      }
     } else {
       setEggData(emptyData());
       setSensors(emptySensors());
     }
+
+    // 🔥 AUTO-CALCULATE AGE FROM BATCH (NEW LOGIC)
+    if (oneTime.batchStartDate && oneTime.initialAgeWeeks && date) {
+      const start = new Date(oneTime.batchStartDate);
+      const current = new Date(date);
+
+      const diffDays = Math.floor(
+        (current - start) / (1000 * 60 * 60 * 24)
+      );
+
+      const weeksPassed = Math.floor(diffDays / 7);
+
+      const calculatedAge =
+        parseInt(oneTime.initialAgeWeeks || 0) + weeksPassed;
+
+      setAgeWeeks(String(Math.max(calculatedAge, 0)));
+    } else {
+      setAgeWeeks("");
+    }
+
     // ✅ ALWAYS RESET TO SET 1
     setCurrentSet(0);
   }, [date]);  
@@ -115,22 +219,42 @@ export default function Home() {
     }
     
     // Validate sensors
-    for (let i = 0; i < sensors.length; i++) {
-      const s = sensors[i];
+    const currentHour = getCurrentHour();
 
-      if (
-        s.ammonia === "" ||
-        s.temperature === "" ||
-        s.humidity === ""
-      ) {
-        alert(`Please complete all fields for Sensor ${i + 1}`);
-        return;
+    // Determine which sensor groups are REQUIRED
+    const requiredTimes = ["morning"]; // always required
+
+    if (currentHour >= SENSOR_TIMES.noon && currentHour < SENSOR_TIMES.afternoon) {
+      requiredTimes.push("noon");
+    }
+
+    if (currentHour >= SENSOR_TIMES.afternoon) {
+      requiredTimes.push("noon", "afternoon");
+    }
+
+    // Validate ONLY required ones
+    for (const time of requiredTimes) {
+      for (let i = 0; i < sensors[time].length; i++) {
+        const s = sensors[time][i];
+
+        if (
+          s.ammonia === "" ||
+          s.temperature === "" ||
+          s.humidity === ""
+        ) {
+          alert(`Please complete all fields for ${getSensorLabel(time)} Sensor ${i + 1}`);
+          return;
+        }
       }
     }
 
     // ✅ DEEP COPY (FIX)
     const eggDataCopy = eggData.map(set => [...set]);
-    const sensorsCopy = sensors.map(s => ({ ...s }));
+    const sensorsCopy = {
+      morning: sensors.morning.map(s => ({ ...s })),
+      noon: sensors.noon.map(s => ({ ...s })),
+      afternoon: sensors.afternoon.map(s => ({ ...s }))
+    };
 
     setHistory((prev) => ({
       ...prev,
@@ -148,10 +272,15 @@ export default function Home() {
     if (entry) {
       // ✅ DEEP COPY (SAFE LOAD)
       setEggData(entry.eggData.map(set => [...set]));
-      setSensors(entry.sensors.map(s => ({ ...s })));
+      setSensors({
+        morning: entry.sensors.morning.map(s => ({ ...s })),
+        noon: entry.sensors.noon.map(s => ({ ...s })),
+        afternoon: entry.sensors.afternoon.map(s => ({ ...s }))
+      });
       setDate(selectedDate);
       setActiveTab("entry");
       setCurrentSet(0);
+      setEntrySubTab("eggs");      
     }
   };
 
@@ -166,11 +295,27 @@ export default function Home() {
         .flat()
         .reduce((s, v) => s + (parseInt(v) || 0), 0);
 
+      const getAllSensors = (entry) => {
+        if (Array.isArray(entry.sensors)) {
+          // OLD DATA
+          return entry.sensors;
+        }
+
+        // NEW DATA
+        return [
+          ...entry.sensors.morning,
+          ...entry.sensors.noon,
+          ...entry.sensors.afternoon
+        ];
+      };
+
+      const allSensors = getAllSensors(history[date]);
+
       const avgTemp =
-        history[date].sensors.reduce(
+        allSensors.reduce(
           (sum, s) => sum + parseFloat(s.temperature || 0),
           0
-        ) / history[date].sensors.length;
+        ) / allSensors.length;
 
       return { date, total, avgTemp };
     });
@@ -228,13 +373,16 @@ export default function Home() {
   // Ammonia impact
   const ammoniaData = Object.keys(history).map(date => {
     const entry = history[date];
-
+    const allSensors = [
+      ...entry.sensors.morning,
+      ...entry.sensors.noon,
+      ...entry.sensors.afternoon
+    ];
     const avgAmmonia =
-      entry.sensors.reduce(
+      allSensors.reduce(
         (sum, s) => sum + parseFloat(s.ammonia || 0),
         0
-      ) / entry.sensors.length;
-
+      ) / allSensors.length;
     const total = entry.eggData
       .flat()
       .reduce((s, v) => s + (parseInt(v) || 0), 0);
@@ -251,17 +399,19 @@ export default function Home() {
   // Humidity impact
   const humidityData = Object.keys(history).map(date => {
     const entry = history[date];
-
+    const allSensors = [
+      ...entry.sensors.morning,
+      ...entry.sensors.noon,
+      ...entry.sensors.afternoon
+    ];
     const avgHumidity =
-      entry.sensors.reduce(
+      allSensors.reduce(
         (sum, s) => sum + parseFloat(s.humidity || 0),
         0
-      ) / entry.sensors.length;
-
+      ) / allSensors.length;
     const total = entry.eggData
       .flat()
       .reduce((s, v) => s + (parseInt(v) || 0), 0);
-
     return { date, total, avgHumidity };
   });
 
@@ -282,17 +432,29 @@ export default function Home() {
         .flat()
         .reduce((s, v) => s + (parseInt(v) || 0), 0);
 
+      const allSensors = [
+        ...entry.sensors.morning,
+        ...entry.sensors.noon,
+        ...entry.sensors.afternoon
+      ];
+
       const avgTemp =
-        entry.sensors.reduce((s, x) => s + parseFloat(x.temperature || 0), 0) /
-        entry.sensors.length;
+        allSensors.reduce(
+          (s, x) => s + parseFloat(x.temperature || 0),
+          0
+        ) / allSensors.length;
 
       const avgHumidity =
-        entry.sensors.reduce((s, x) => s + parseFloat(x.humidity || 0), 0) /
-        entry.sensors.length;
+        allSensors.reduce(
+          (s, x) => s + parseFloat(x.humidity || 0),
+          0
+        ) / allSensors.length;
 
       const avgAmmonia =
-        entry.sensors.reduce((s, x) => s + parseFloat(x.ammonia || 0), 0) /
-        entry.sensors.length;
+        allSensors.reduce(
+          (s, x) => s + parseFloat(x.ammonia || 0),
+          0
+        ) / allSensors.length;
 
       return {
         date,
@@ -421,7 +583,8 @@ export default function Home() {
         {/* TABS */}
         <div style={{ display: "flex", marginBottom: "15px" }}>
           {[
-            { key: "entry", label: "Egg Entry" },
+            { key: "entry", label: "Daily Entry" },
+            { key: "oneTime", label: "One Time Entry" },
             { key: "history", label: "History" },
             { key: "analysis", label: "Analysis" }
           ].map((tab) => (
@@ -463,105 +626,147 @@ export default function Home() {
               </div>
 
               <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "8px" }}>
-                <span style={{ fontWeight: "bold" }}>Total Eggs:</span>
-                <span>{totalEggs}</span>
+                <span style={{ fontWeight: "bold" }}>Total Eggs: {totalEggs}</span>
+                <span style={{ marginLeft: "15px", fontWeight: "bold" }}>   Age: {ageWeeks ? `${ageWeeks} weeks` : "-"}</span>
               </div>
 
             </div>
 
-            {/* SENSOR INPUTS INLINE */}
-            <div style={{ marginBottom: "15px" }}>
-              {sensors.map((sensor, index) => (
-                <div key={index} style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "5px",
-                  marginBottom: "8px"
-                }}>
-                  <span style={{ minWidth: "70px", fontWeight: "bold" }}>
-                    Sensor {index + 1}:
-                  </span>
-
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="Ammonia"
-                    value={sensor.ammonia}
-                    onChange={(e) =>
-                      handleSensorChange(index, "ammonia", e.target.value)
-                    }
-                    style={{ border: "1px solid #ccc", padding: "4px", width: "100px" }}
-                  />
-
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="Temp (C)"
-                    value={sensor.temperature}
-                    onChange={(e) =>
-                      handleSensorChange(index, "temperature", e.target.value)
-                    }
-                    style={{ border: "1px solid #ccc", padding: "4px", width: "100px" }}
-                  />
-
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="Humidity"
-                    value={sensor.humidity}
-                    onChange={(e) =>
-                      handleSensorChange(index, "humidity", e.target.value)
-                    }
-                    style={{ border: "1px solid #ccc", padding: "4px", width: "100px" }}
-                  />
-
-                </div>
+            {/* 🔥 ENTRY SUB-TABS */}
+            <div style={{ display: "flex", marginBottom: "15px" }}>
+              {[
+                { key: "eggs", label: "Egg Entry" },
+                { key: "morning", label: getSensorLabel("morning") },
+                { key: "noon", label: getSensorLabel("noon") },
+                { key: "afternoon", label: getSensorLabel("afternoon") }
+              ].map(tab => (
+                <button
+                  key={tab.key}
+                  onClick={() => setEntrySubTab(tab.key)}
+                  style={{
+                    flex: 1,
+                    padding: "8px",
+                    border: "none",
+                    cursor: "pointer",
+                    background: entrySubTab === tab.key ? "#2563eb" : "#e5e7eb",
+                    color: entrySubTab === tab.key ? "white" : "black"
+                  }}
+                >
+                  {tab.label}
+                </button>
               ))}
             </div>
 
-            {/* GRID unchanged */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "10px" }}>
-              {eggData[currentSet].map((value, cageIndex) => (
-                <div key={cageIndex}>
-                  <label style={{ fontSize: "12px" }}>
-                    Cage {cageIndex + 1}
-                  </label>
-                  <select
-                    value={value}
-                    onChange={(e) =>
-                      handleChange(currentSet, cageIndex, e.target.value)
-                    }
-                    style={{
-                      width: "100%",
-                      padding: "8px",
-                      borderRadius: "6px",
-                      border: "1px solid #ccc"
-                    }}
-                  >
-                    {[0, 1, 2, 3, 4].map((num) => (
-                      <option key={num} value={num}>
-                        {num}
-                      </option>
-                    ))}
-                  </select>
+            {/* EGGS GRID */}
+            {entrySubTab === "eggs" && (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "10px" }}>
+                  {eggData[currentSet].map((value, cageIndex) => (
+                    <div key={cageIndex}>
+                      <label style={{ fontSize: "12px" }}>
+                        Cage {cageIndex + 1}
+                      </label>
+                      <select
+                        value={value}
+                        onChange={(e) =>
+                          handleChange(currentSet, cageIndex, e.target.value)
+                        }
+                        style={{
+                          width: "100%",
+                          padding: "8px",
+                          borderRadius: "6px",
+                          border: "1px solid #ccc"
+                        }}
+                      >
+                        {[0, 1, 2, 3, 4].map((num) => (
+                          <option key={num} value={num}>
+                            {num}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
 
-            {/* REST unchanged */}
-            <div style={{ display: "flex", justifyContent: "space-between", marginTop: "15px" }}>
-              <button onClick={() => setCurrentSet(Math.max(0, currentSet - 1))}
-                style={{ padding: "10px 15px", borderRadius: "8px", border: "none", background: "#6b7280", color: "white" }}>
-                ⬅ Prev
-              </button>
+                {/* EGGS GRID NAVIGATION */}
+                <div style={{ display: "flex", justifyContent: "space-between", marginTop: "15px" }}>
+                  <button onClick={() => setCurrentSet(Math.max(0, currentSet - 1))}
+                    style={{ padding: "10px 15px", borderRadius: "8px", border: "none", background: "#6b7280", color: "white" }}>
+                    ⬅ Prev Set
+                  </button>
 
-              <div>Set {currentSet + 1} / {TOTAL_SETS}</div>
+                  <div>Set {currentSet + 1} / {TOTAL_SETS}</div>
 
-              <button onClick={() => setCurrentSet(Math.min(TOTAL_SETS - 1, currentSet + 1))}
-                style={{ padding: "10px 15px", borderRadius: "8px", border: "none", background: "#2563eb", color: "white" }}>
-                Next ➡
-              </button>
-            </div>
+                  <button onClick={() => setCurrentSet(Math.min(TOTAL_SETS - 1, currentSet + 1))}
+                    style={{ padding: "10px 15px", borderRadius: "8px", border: "none", background: "#2563eb", color: "white" }}>
+                    Next Set ➡
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* 🔥 SENSOR TABS */}
+            {["morning", "noon", "afternoon"].map(time => {
+              if (entrySubTab !== time) return null;
+
+              const labelMap = {
+                morning: getSensorLabel("morning"),
+                noon: getSensorLabel("noon"),
+                afternoon: getSensorLabel("afternoon")
+              };
+
+              return (
+                <div key={time}>
+                  <h4 style={{ marginBottom: "10px", fontWeight: "bold" }}>{labelMap[time]}</h4>
+
+                  {sensors[time].map((sensor, index) => (
+                    <div key={index} style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "5px",
+                      marginBottom: "8px"
+                    }}>
+                      <span style={{ minWidth: "70px", fontWeight: "bold" }}>
+                        Sensor {index + 1}:
+                      </span>
+
+                      <input
+                        type="number"
+                        step="0.01"
+                        placeholder="Ammonia"
+                        value={sensor.ammonia}
+                        onChange={(e) =>
+                          handleSensorChange(time, index, "ammonia", e.target.value)
+                        }
+                        style={{ width: "95px" }}
+                      />
+
+                      <input
+                        type="number"
+                        step="0.01"
+                        placeholder="Temp (C)"
+                        value={sensor.temperature}
+                        onChange={(e) =>
+                          handleSensorChange(time, index, "temperature", e.target.value)
+                        }
+                        style={{ width: "95px" }}
+                      />
+
+                      <input
+                        type="number"
+                        step="0.01"
+                        placeholder="Humidity"
+                        value={sensor.humidity}
+                        onChange={(e) =>
+                          handleSensorChange(time, index, "humidity", e.target.value)
+                        }
+                        style={{ width: "95px" }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
 
             <div style={{ display: "flex", gap: "10px", marginTop: "15px" }}>
               <button onClick={handleClear}
@@ -577,7 +782,102 @@ export default function Home() {
           </>
         )}
 
-        {/* HISTORY unchanged */}
+        {/* ONE-TIME ENTRY */}
+        {activeTab === "oneTime" && (
+          <div>
+            <h3 style={{ marginBottom: "15px", fontWeight: "bold" }}>📌 Batch Setup</h3>
+
+            {/* Batch Start */}
+            <div style={{ display: "flex", alignItems: "center", marginBottom: "10px" }}>
+              <label style={{ width: "180px", textAlign: "right", marginRight: "10px", fontWeight: "bold" }}>
+                📅 Batch Start Date
+              </label>
+              <input
+                type="date"
+                value={oneTime.batchStartDate}
+                onChange={(e) =>
+                  setOneTime({ ...oneTime, batchStartDate: e.target.value })
+                }
+                style={{
+                  width: "220px",
+                  padding: "6px",
+                  borderRadius: "6px",
+                  border: "1px solid #ccc"
+                }}
+              />
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", marginBottom: "10px" }}>
+              <label style={{ width: "180px", textAlign: "right", marginRight: "10px", fontWeight: "bold" }}>
+                Initial Age (weeks)
+              </label>
+              <input
+                type="number"
+                value={oneTime.initialAgeWeeks}
+                onChange={(e) =>
+                  setOneTime({ ...oneTime, initialAgeWeeks: e.target.value })
+                }
+                style={{
+                  width: "220px",
+                  padding: "6px",
+                  borderRadius: "6px",
+                  border: "1px solid #ccc"
+                }}
+              />
+            </div>
+
+            <hr style={{ margin: "15px 0" }} />
+
+            <h3 style={{ marginBottom: "15px", fontWeight: "bold" }}>💰 One-Time Costs</h3>
+
+            {[
+              { key: "housingCost", label: "Housing Cost" },
+              { key: "cageCost", label: "Cage Cost" },
+              { key: "chickenCost", label: "Chicken Cost" }
+            ].map(({ key, label }) => (
+              <div key={key} style={{ display: "flex", alignItems: "center", marginBottom: "10px" }}>
+                <label style={{ width: "180px", textAlign: "right", marginRight: "10px", fontWeight: "bold" }}>
+                  {label}
+                </label>
+
+                <div style={{ position: "relative", width: "220px" }}>
+                  <input
+                    type="text"
+                    value={oneTime[key]}
+                    onChange={(e) =>
+                      setOneTime({ ...oneTime, [key]: e.target.value })
+                    }
+                    onFocus={(e) => {
+                      setOneTime({
+                        ...oneTime,
+                        [key]: parsePHP(oneTime[key])
+                      });
+                    }}
+                    onBlur={(e) => {
+                      const raw = parsePHP(oneTime[key]);
+                      if (!raw) return;
+
+                      setOneTime({
+                        ...oneTime,
+                        [key]: formatPHP(raw)
+                      });
+                    }}
+                    style={{
+                      width: "100%",
+                      padding: "6px 8px",
+                      borderRadius: "6px",
+                      border: "1px solid #ccc"
+                    }}
+                  />
+
+                </div>
+
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* HISTORY */}
         {activeTab === "history" && (
           <div>
             {Object.keys(history)
@@ -603,9 +903,6 @@ export default function Home() {
               })}
           </div>
         )}
-
-
-
 
         {activeTab === "analysis" && (
           <div style={{ border: "1px dashed #ccc", padding: "20px", borderRadius: "8px" }}>
